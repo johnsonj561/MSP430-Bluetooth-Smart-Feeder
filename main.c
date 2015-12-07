@@ -6,6 +6,11 @@
  *baudrate = 9600
  *TXD = P1.1
  *RXD = P1.2
+ *IR Sensor to detect Hopper food supply = P1.3
+ *Pressure Sensor to detect Bowl  food supply = P1.4
+ *IR Sensors to detect bowl activity (presence of animal) = P1.5
+ *Servo Motor Dispenses Food = P1.6
+ *IR Light to Detect Hopper Supply = P1.7
  *
  */
 #include <msp430g2253.h>
@@ -19,13 +24,15 @@ unsigned char Rx_Data = 0;					//temp RX variable
 unsigned char Tx_Data = 0;					//temp TX variable
 int weight = 0;								//stores weight of food supply
 int ir = 0;									//stores value of IR sensor
-int ADCReading [2];							//array to store analog digital conversion values
+int light = 0;								//light value to detect hopper food shortage
+int ADCReading [3];							//array to store analog digital conversion values
 int motorActive = 0;						//flag to control motor activity
 int i;										//counter
 
 int stopMotor(void);						//prevents motor operation if object is detected within 2 ft proximity
 void dispenseFood(void);					//activates servo motor to dispense food
 void sendFoodSupply(int);					//sends appropriate message to mobile device via Bluetooth
+voi sendHopperSupply(int);					//sends appropriate message to mobile device via Bluetooth
 void UARTSendArray(char *TxArray, int ArrayLength);//sends message through Bluetooth Module
 void clearUART(void);						//clear UART buffer to ensure all data has been sent/received
 void configureADC(void);					//configure analog digital convertor - P1.4 (weight sensor) P1.5 (IR sensor)
@@ -44,17 +51,16 @@ int main(void)
   DCOCTL = CALDCO_1MHZ;
 
   /*** Set-up GPIO ***/
-  P1SEL = BIT1 + BIT2;					// P1.1 = TXD, P1.2=RXD
+  P1SEL = BIT1 + BIT2 + BIT6;			// P1.1 = TXD, P1.2=RXD
   P1SEL2 = BIT1 + BIT2;
-  P1DIR |= (~BIT0) + (~BIT3) + BIT6; 	// P1.4 (weight sensor) P1.5 (ir sensor) P1.6 (servo motor)
-  P1DIR |= BIT6;						// P1.6 output PWM to servo motor
-  P1SEL |= BIT6;
+  P1DIR |= BIT6 + BIT7;					//P1.6 output for Servo motor, P1.7 output for IR light detection
+  P1OUT &= ~BIT7;						//turn off BIT7
 
   /*** Set-up PWM for Servo ***/
-  TACCTL1	= OUTMOD_7;            // TACCR1 reset/set
-  TACTL	= TASSEL_2 + MC_1;     	   // SMCLK, upmode
-  TACCR0	= PWM_Period-1;        // PWM Period
-  TACCR1	= PWM_Duty;            // TACCR1 PWM Duty Cycle
+  TACCTL1	= OUTMOD_7;            		// TACCR1 reset/set
+  TACTL	= TASSEL_2 + MC_1;     	   		// SMCLK, upmode
+  TACCR0	= PWM_Period-1;        		// PWM Period
+  TACCR1	= PWM_Duty;            		// TACCR1 PWM Duty Cycle
 
   /*** Set-up USCI A ***/
   UCA0CTL1 |= UCSSEL_2;					// SMCLK
@@ -74,7 +80,8 @@ int main(void)
     	case 0x57:
     		readADC();						//read analog values from sensors
     		sendFoodSupply(weight);			//send weight value to TX Buffer
-    		clearUART();						//clear TX Buffer
+    		sendHopperSupply(light);		//send hopper supply value to TX Buffer
+    		clearUART();					//clear TX Buffer
 		break;
 
 		//Feed Command 'F' = 0x46; Activates servo to dispense food from hopper to bowl//
@@ -83,6 +90,9 @@ int main(void)
     			if(!motorActive){
     				motorActive = 1;		//motorActive flag prevents user from activating motor repeatedly
     				dispenseFood();			//activate motor
+    				readADC();
+    				sendFoodSupply(weight);
+    				sendHopperSupply(light);
     			}
     			__delay_cycles(3000000);	//delay forces motor to return to 0 and properly refill dispenser with food
     			motorActive = 0;			//reset flag
@@ -111,7 +121,8 @@ void dispenseFood(){
  */
 int stopMotor(){
 	readADC();					//read analog values from sensors
-	if(ir > 200){				//if IR detects object in close proximity, stop motor for safety
+	if(ir > 200 || light > 75){//if IR detects object in close proximity or empty hopper, stop motor for safety
+
 		return 1;
 	}
 	else{						//else - allow motor operation, no object detected
@@ -123,52 +134,46 @@ int stopMotor(){
  * Send appropriate message to Bluetooth device
  */
 void sendFoodSupply(int weight){
-  if(weight < 10){
-    UARTSendArray("Empty Bowl", 10);
+  if(weight < 140){
+    UARTSendArray("B0", 2);	//B0 = empty bowl (0%)
   }
-  else if(weight < 20){
-    UARTSendArray("10 %", 4);
+  else if(weight < 150){
+    UARTSendArray("B25", 3); //B25 = 25%
   }
-  else if(weight < 30){
-    UARTSendArray("20 %", 4);
+  else if(weight < 200){
+    UARTSendArray("B50", 3); //B50 = 50%
   }
-  else if(weight < 40){
-    UARTSendArray("30 %", 4);
-  }
-  else if(weight < 50){
-    UARTSendArray("40 %", 4);
-  }
-  else if(weight < 60){
-    UARTSendArray("50 %", 4);
-  }
-  else if(weight < 70){
-    UARTSendArray("60 %", 4);
-  }
-  else if(weight < 80){
-    UARTSendArray("70 %", 4);
-  }
-  else if(weight < 90){
-    UARTSendArray("80 %", 4);
-  }
-  else if(weight < 100){
-    UARTSendArray("90 %", 4);
+  else if(weight < 220){
+    UARTSendArray("B75", 3); //B75 = 75%
   }
   else{
-    UARTSendArray("Full Bowl", 9);
+    UARTSendArray("B100", 4); //B100 = 100%
   }
+}
+
+void sendHopperSupply(int light){
+	if(light > 75){
+		UARTSendArray("H0", 2);	//H0 = empty hopper
+	}
+	else{
+		UARTSendArray("H1", 2);	//H1 = hopper has food
+	}
 }
 
 void configureADC(){
-   ADC10CTL1 = INCH_5 | CONSEQ_1; 				//A5 and A4, single sequence
+   ADC10CTL1 = INCH_5 | CONSEQ_1; 				//A5, A4 and A3, single sequence
    ADC10CTL0 = ADC10SHT_2 | MSC | ADC10ON;
    while (ADC10CTL1 & BUSY);
-   ADC10DTC1 = 0x02; 							// 2 conversions - this prevents conversions on A3 A2 and A1
-   ADC10AE0 |= (BIT4 + BIT5); 					//Disables digital input on P1.4 and P1.5
+   ADC10DTC1 = 0x03; 							// 2 conversions - this prevents conversions on A3 A2 and A1
+   ADC10AE0 |= (BIT3 + BIT4 + BIT5); 			//Disables digital input on P1.4 and P1.5
 }
 
 void readADC(){
+	P1OUT |= BIT7;						//turn on BIT7 to check hopper supply
+	__delay_cycles(200000);
 	weight = 0;
 	ir = 0;
+	light = 0;
 	for(i=1; i<=10 ; i++){
 				ADC10CTL0 &= ~ENC;					//ADC10 Enable Conversion
 				while (ADC10CTL1 & BUSY);			//Wait while ADC is busy
@@ -178,9 +183,12 @@ void readADC(){
 
 				ir += ADCReading[0];
 				weight += ADCReading[1];
+				light += ADCReading[2];
 			}
-			ir = ir/10;
-			weight = weight/10;
+	ir = ir/10;
+	weight = weight/10;
+	light = light/10;
+	P1OUT &= ~BIT7;		//turn off led
 
 }
 /**
