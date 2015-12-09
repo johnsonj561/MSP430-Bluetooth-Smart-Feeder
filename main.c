@@ -32,7 +32,7 @@ int i;										//counter
 int stopMotor(void);						//prevents motor operation if object is detected within 2 ft proximity
 void dispenseFood(void);					//activates servo motor to dispense food
 void sendFoodSupply(int);					//sends appropriate message to mobile device via Bluetooth
-voi sendHopperSupply(int);					//sends appropriate message to mobile device via Bluetooth
+void sendHopperSupply(int);					//sends appropriate message to mobile device via Bluetooth
 void UARTSendArray(char *TxArray, int ArrayLength);//sends message through Bluetooth Module
 void clearUART(void);						//clear UART buffer to ensure all data has been sent/received
 void configureADC(void);					//configure analog digital convertor - P1.4 (weight sensor) P1.5 (IR sensor)
@@ -80,6 +80,7 @@ int main(void)
     	case 0x57:
     		readADC();						//read analog values from sensors
     		sendFoodSupply(weight);			//send weight value to TX Buffer
+    		clearUART();					//clear buffer
     		sendHopperSupply(light);		//send hopper supply value to TX Buffer
     		clearUART();					//clear TX Buffer
 		break;
@@ -92,7 +93,9 @@ int main(void)
     				dispenseFood();			//activate motor
     				readADC();
     				sendFoodSupply(weight);
+    				clearUART();
     				sendHopperSupply(light);
+    				clearUART();
     			}
     			__delay_cycles(3000000);	//delay forces motor to return to 0 and properly refill dispenser with food
     			motorActive = 0;			//reset flag
@@ -121,8 +124,7 @@ void dispenseFood(){
  */
 int stopMotor(){
 	readADC();					//read analog values from sensors
-	if(ir > 200 || light > 75){//if IR detects object in close proximity or empty hopper, stop motor for safety
-
+	if(ir > 200){				//if IR detects object in close proximity stop motor for safety
 		return 1;
 	}
 	else{						//else - allow motor operation, no object detected
@@ -154,9 +156,6 @@ void sendFoodSupply(int weight){
 void sendHopperSupply(int light){
 	if(light > 75){
 		UARTSendArray("H0", 2);	//H0 = empty hopper
-	}
-	else{
-		UARTSendArray("H1", 2);	//H1 = hopper has food
 	}
 }
 
